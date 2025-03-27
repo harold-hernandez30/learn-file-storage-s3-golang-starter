@@ -21,11 +21,7 @@ type apiConfig struct {
 	s3Region         string
 	s3CfDistribution string
 	port             string
-}
-
-type thumbnail struct {
-	data      []byte
-	mediaType string
+	host			 string
 }
 
 func main() {
@@ -81,6 +77,11 @@ func main() {
 		log.Fatal("PORT environment variable is not set")
 	}
 
+	host := os.Getenv("HOST")
+	if port == "" {
+		log.Fatal("HOST environment variable is not set")
+	}
+
 	cfg := apiConfig{
 		db:               db,
 		jwtSecret:        jwtSecret,
@@ -91,6 +92,7 @@ func main() {
 		s3Region:         s3Region,
 		s3CfDistribution: s3CfDistribution,
 		port:             port,
+		host:			  host,
 	}
 
 	err = cfg.ensureAssetsDir()
@@ -125,6 +127,6 @@ func main() {
 		Handler: mux,
 	}
 
-	log.Printf("Serving on: http://localhost:%s/app/\n", port)
+	log.Printf("Serving on: %s:%s/app/\n", host, port)
 	log.Fatal(srv.ListenAndServe())
 }

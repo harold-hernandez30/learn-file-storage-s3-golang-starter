@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 
 	"github.com/joho/godotenv"
@@ -22,6 +25,7 @@ type apiConfig struct {
 	s3CfDistribution string
 	port             string
 	host			 string
+	s3Client		 *s3.Client
 }
 
 func main() {
@@ -78,8 +82,18 @@ func main() {
 	}
 
 	host := os.Getenv("HOST")
-	if port == "" {
+	if host == "" {
 		log.Fatal("HOST environment variable is not set")
+	}
+
+	awsConfig, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(s3Region))
+	if err != nil {
+		log.Fatalf("Couldn't load aws default config: %v", err)
+	}
+
+	s3Client := s3.NewFromConfig(awsConfig)
+	if s3Client == nil {
+		log.Fatalf("Couldn't create new config for s3 client")
 	}
 
 	cfg := apiConfig{
@@ -93,6 +107,7 @@ func main() {
 		s3CfDistribution: s3CfDistribution,
 		port:             port,
 		host:			  host,
+		s3Client: 		  s3Client,
 	}
 
 	err = cfg.ensureAssetsDir()

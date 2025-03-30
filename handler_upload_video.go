@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -10,11 +11,43 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
 )
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+	var buffer bytes.Buffer
+	cmd.Stdout = &buffer
+	err := cmd.Run()
+
+	if err != nil {
+		return "", fmt.Errorf("unable to run command with filePath %s. cmd: %s, error: %s", filePath, cmd.String(), err)
+	}
+
+
+	type stream struct {
+		Width int `json:"width"`
+		Height int `json:"height"`
+	}
+	type streams struct {
+		Streams []stream `json:"streams"`
+	}
+
+	outputStream := streams{}
+	err = json.Unmarshal(buffer.Bytes(), &outputStream)
+
+	if err != nil {
+		return "", fmt.Errorf("unable to unmarshal the stream: %s", err)
+	}
+
+
+	return GetVideoAspectRatio(outputStream.Streams[0].Width, outputStream.Streams[0].Height), nil
+
+}
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
 	maxUploadLimit := 1 << 30
@@ -64,11 +97,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 
 	if mediaType != "video/mp4" {
-		respondWithError(w, http.StatusBadRequest, "Unsupported media type", fmt.Errorf("provided media type: %s\n", mediaType))
+		respondWithError(w, http.StatusBadRequest, "Unsupported media type", fmt.Errorf("provided media type: %s", mediaType))
 		return
 	}
 
-	tempFile, err := os.CreateTemp("", "tubely-upload-placeholder.mp4")	
+	placeholderFilename := "tubely-upload-placeholder.mp4"
+	tempFile, err := os.CreateTemp("", placeholderFilename)	
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to create temporary placeholder", err)
 		return
@@ -77,11 +111,13 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	defer os.Remove(tempFile.Name())
 	defer tempFile.Close()
 
+
 	_, err = io.Copy(tempFile, videoFile)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to copy file", err)
 		return
 	}
+
 
 	_, err = tempFile.Seek(0, io.SeekStart)
 	if err != nil {
@@ -89,13 +125,25 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// pathToTempFile := path.Join(os.TempDir(), placeholderFilename)
+	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to get video aspect ratio", err)
+		return
+	}
+
+	aspectRatioText := aspectRatioToText(aspectRatio)
+
+	
 	encoding := base64.RawURLEncoding
 	randBytes := make([]byte, 32)
 	rand.Read(randBytes)
 	randBase64String := encoding.EncodeToString(randBytes)
+	awsFullPath := fmt.Sprintf("%s/%s.mp4", aspectRatioText, randBase64String)
 	params := s3.PutObjectInput{
 		Bucket: &cfg.s3Bucket,
-		Key: &randBase64String,
+		Key: &awsFullPath,
 		Body: tempFile,
 		ContentType: &mediaType,
 	}
@@ -106,7 +154,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	newURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s.mp4", cfg.s3Bucket, cfg.s3Region, randBase64String)
+	newURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, awsFullPath)
 	video.VideoURL = &newURL
 
 	err = cfg.db.UpdateVideo(video)
@@ -123,4 +171,16 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	respondWithJSON(w, http.StatusOK, videoInBytes)
 
+}
+
+
+func aspectRatioToText(aspectRatio string) string {
+	switch aspectRatio {
+	case "16:9":
+		return "landscape"
+	case "9:16":
+		return "portrait"
+	default:
+		return "other"
+	}
 }

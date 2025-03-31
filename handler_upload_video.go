@@ -109,24 +109,36 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 
 	defer os.Remove(tempFile.Name())
-	defer tempFile.Close()
-
+	defer tempFile.Close()	
 
 	_, err = io.Copy(tempFile, videoFile)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to copy file", err)
+		respondWithError(w, http.StatusInternalServerError, "Unable to copy to temp file", err)
+		return
+	}
+
+	processedVideoFilePath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to fast start the video", err)
+		return
+	}
+
+	processedVideoFile, err := os.Open(processedVideoFilePath)	
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to open processed video file", err)
 		return
 	}
 
 
-	_, err = tempFile.Seek(0, io.SeekStart)
+
+
+	_, err = processedVideoFile.Seek(0, io.SeekStart)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to offset to the beginning of the temp file", err)
 		return
 	}
 
-	// pathToTempFile := path.Join(os.TempDir(), placeholderFilename)
-	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	aspectRatio, err := getVideoAspectRatio(processedVideoFile.Name())
 
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to get video aspect ratio", err)
@@ -144,7 +156,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	params := s3.PutObjectInput{
 		Bucket: &cfg.s3Bucket,
 		Key: &awsFullPath,
-		Body: tempFile,
+		Body: processedVideoFile,
 		ContentType: &mediaType,
 	}
 

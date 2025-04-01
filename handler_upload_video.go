@@ -129,9 +129,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-
-
-
 	_, err = processedVideoFile.Seek(0, io.SeekStart)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to offset to the beginning of the temp file", err)
@@ -165,8 +162,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Unable to add the object to the bucket", err)
 		return
 	}
-
-	newURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, awsFullPath)
+	
+	newURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, awsFullPath)
 	video.VideoURL = &newURL
 
 	err = cfg.db.UpdateVideo(video)
@@ -175,7 +172,14 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	videoInBytes, err := json.Marshal(&video)
+	signedVideo, err := cfg.dbVideoToSignedVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to sign video", err)
+		return
+	}
+
+
+	videoInBytes, err := json.Marshal(&signedVideo)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to marshal video", err)
 		return

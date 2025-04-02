@@ -149,10 +149,10 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	randBytes := make([]byte, 32)
 	rand.Read(randBytes)
 	randBase64String := encoding.EncodeToString(randBytes)
-	awsFullPath := fmt.Sprintf("%s/%s.mp4", aspectRatioText, randBase64String)
+	s3ObjectKey := fmt.Sprintf("%s/%s.mp4", aspectRatioText, randBase64String)
 	params := s3.PutObjectInput{
 		Bucket: &cfg.s3Bucket,
-		Key: &awsFullPath,
+		Key: &s3ObjectKey,
 		Body: processedVideoFile,
 		ContentType: &mediaType,
 	}
@@ -162,8 +162,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Unable to add the object to the bucket", err)
 		return
 	}
-	
-	newURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, awsFullPath)
+
+	newURL := fmt.Sprintf("%s/%s", cfg.s3CfDistribution, s3ObjectKey)
 	video.VideoURL = &newURL
 
 	err = cfg.db.UpdateVideo(video)
@@ -172,14 +172,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	signedVideo, err := cfg.dbVideoToSignedVideo(video)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to sign video", err)
-		return
-	}
 
-
-	videoInBytes, err := json.Marshal(&signedVideo)
+	videoInBytes, err := json.Marshal(&video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to marshal video", err)
 		return
